@@ -4,7 +4,7 @@ import numpy as np
 import torchvision.models
 import pytorch_lightning as pl
 from torchvision import transforms as tfm
-from pytorch_metric_learning import losses
+from pytorch_metric_learning import losses,miners
 from torch.utils.data.dataloader import DataLoader
 from pytorch_lightning.callbacks import ModelCheckpoint
 
@@ -15,7 +15,14 @@ from datasets.train_dataset import TrainDataset
 
 
 class LightningModel(pl.LightningModule):
-    def __init__(self, val_dataset, test_dataset, descriptors_dim=512, num_preds_to_save=0, save_only_wrong_preds=True):
+    def __init__(self,
+                val_dataset,
+                test_dataset, 
+                descriptors_dim=512, 
+                num_preds_to_save=0, 
+                save_only_wrong_preds=True,
+                poolinglayer = "default", 
+                optimizer = "default",):
         super().__init__()
         self.val_dataset = val_dataset
         self.test_dataset = test_dataset
@@ -26,19 +33,54 @@ class LightningModel(pl.LightningModule):
         # Change the output of the FC layer to the desired descriptors dimension
         self.model.fc = torch.nn.Linear(self.model.fc.in_features, descriptors_dim)
         # Set the loss function
-        self.loss_fn = losses.ContrastiveLoss(pos_margin=0, neg_margin=1)
+        self.miner_fn = miners.MultiSimilarityMiner( epsilon=0.1 )
+        #self.loss_fn = losses.ContrastiveLoss(pos_margin=0, neg_margin=1)
+        #self.loss_fn = losses.MultiSimilarityLoss( alpha=2, beta=50, base=0.5 )
+        self.loss_fn = losses.MultiSimilarityLoss( alpha=1, beta=50, base=0.0 )
+        self.optimizer = optimizer.lower()
+        self.poolinglayer = poolinglayer.lower()
 
     def forward(self, images):
         descriptors = self.model(images)
         return descriptors
+    
+    def configure_poolinglayer(self):
+        '''if self.poolinglayer="gem"
+           self.model.poolinglayer = aggregators.GeMPooling(feature_size = self.model.fc.in_features , pool_size = 7, init_norm = 3.0, eps = 1e-6, normalize = False)
+        elif self.poolinglayer == "netvlad":
+            #changed to a version found in prof repo
+            self.model.poolinglayer = aggregators.NetVLAD(num_clusters = 64, dim = self.model.fc.in_features)
+        el'''
+        if self.poolinglayer == "mixvpr":
+            #TODO: lower dimension like 256, 4
+            self.mixvpr_out_channels = 256 #512
+            self.mixvpr_out_rows = 4
+            # MixVPR works with an input of dimension [n_batch, 512, 7,7] == [n_batch, in_channels, in_h, in_w]
+            self.model.poolinglayer = aggregators.MixVPR( in_channels = self.model.fc.in_features, in_h = 7, in_w = 7, out_channels = self.mixvpr_out_channels , out_rows =  self.mixvpr_out_rows )
+        return poolinglayer
 
     def configure_optimizers(self):
-        optimizers = torch.optim.SGD(self.parameters(), lr=0.001, weight_decay=0.001, momentum=0.9)
-        return optimizers
+        if self.optimizer.lower() == 'sgd':
+            optimizer = torch.optim.SGD(self.parameters(), 
+                                        lr=self.lr, 
+                                        weight_decay=self.weight_decay, 
+                                        momentum=self.momentum)
+        elif self.optimizer.lower() == 'adamw':
+            optimizer = torch.optim.AdamW(self.parameters(), 
+                                        lr=self.lr, 
+                                        weight_decay=self.weight_decay)
+        elif self.optimizer.lower() == 'adam':
+            optimizer = torch.optim.AdamW(self.parameters(), 
+                                        lr=self.lr, 
+                                        weight_decay=self.weight_decay)
+        return optimizer
 
     #  The loss function call (this method will be called at each training iteration)
     def loss_function(self, descriptors, labels):
-        loss = self.loss_fn(descriptors, labels)
+        ## add miner for loss'pair selections
+        miner_output=self.miner_fn(descriptors,labels)
+        ## add miner_output
+        loss = self.loss_fn(descriptors, labels, miner_output)
         return loss
 
     # This is the training step that's executed at each iteration
@@ -108,10 +150,17 @@ def get_datasets_and_dataloaders(args):
 
 
 if __name__ == '__main__':
-    args = parser.parse_arguments()
-
-    train_dataset, val_dataset, test_dataset, train_loader, val_loader, test_loader = get_datasets_and_dataloaders(args)
-    model = LightningModel(val_dataset, test_dataset, args.descriptors_dim, args.num_preds_to_save, args.save_only_wrong_preds)
+    args = parser.parse_arguments() #read the parameters from parser
+    train_dataset,val_dataset,test_dataset, train_loader,val_loader,test_loader = get_datasets_and_dataloaders(args)
+    model_args = {
+        "poolinglayer" : args.poolinglayer,
+        "optimizer" : args.optimizer, 
+        }
+    model = LightningModel(val_dataset,
+                           test_dataset,
+                           args.descriptors_dim, 
+                           args.num_preds_to_save, 
+                           args.save_only_wrong_preds)
     
     # Model params saving using Pytorch Lightning. Save the best 3 models according to Recall@1
     checkpoint_cb = ModelCheckpoint(
