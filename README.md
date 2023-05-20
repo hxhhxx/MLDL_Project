@@ -13,8 +13,12 @@ The following script:
 
 allows you to download GSV_xs, SF_xs, tokyo_xs, which are reduced version of the GSVCities, SF-XL, Tokyo247 datasets respectively.
 
+   gsv_xs:stable angle for different time
+   tokyo_xs:stable angle for different time 7/24
+   sf_xs:diff angle for same time
+
+
 ## Install dependencies
-NB: if you are using Colab, skip this section
 
 You can install the required packages by running
 > pip install -r requirements.txt
@@ -26,12 +30,27 @@ You can choose to validate/test on sf_xs or tokyo_xs.
 
 >python main.py --train_path /path/to/datasets/gsv_xs --val_path /path/to/datasets/tokyo_xs/test --test_path /path/to/datasets/tokyo_xs/test
 
+## Visually analize
 
-## Usage on Colab
 
-We provide you with the notebook `colab_example.ipynb`.
-It shows you how to attach your GDrive file system to Colab, unzip the datasets, install packages and run your first experiment.
+##### Achitechture
+Modal(basebone+final pooling)
+ ->Loss function(+mining)
+   ->Optimizer
 
-NB: BEFORE running this notebook, you must copy the datasets zip into your GDrive. You can use the [link](https://drive.google.com/drive/folders/1Ucy9JONT26EjDAjIJFhuL9qeLxgSZKmf?usp=sharing) that we provided and simply click 'create a copy'. Make sure that you have enough space (roughly 8 GBs)
+##### REAL research
+e.Modules:Gem-pooling layer
+        NetVlad layer
+        Mix-vpr
 
-NB^2: you can ignore the dataset `robotcar_one_every_2m`.
+a.Miners: Pair margin
+        Multi-Similarity
+        GLOBAL PROXY-BASED HARD MINING
+
+b.Losses:Contrasive
+        Multi-Similarity
+
+f.Optimizers:SGD
+            ASGD
+            ADAM
+            ADAMW
